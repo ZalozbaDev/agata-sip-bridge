@@ -1,0 +1,23 @@
+{
+  "name": "sip-client-node",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "ws:client": "tsx src/tools/ws-client.ts"
+  },
+  "dependencies": {
+    "axios": "^1.7.9",
+    "ws": "^8.17.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.1",
+    "@types/ws": "^8.5.12",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  }
+}

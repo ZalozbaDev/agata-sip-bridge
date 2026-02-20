@@ -1,0 +1,60 @@
+[global]
+type=global
+
+; Make sure inbound requests can be matched by source IP via identify sections.
+; (Needed for most provider trunks, otherwise Asterisk may log: "No matching endpoint found".)
+endpoint_identifier_order=ip,username,anonymous
+
+[transport-udp]
+type=transport
+protocol=udp
+bind=${SIP_BIND}:5060
+
+; ==============================
+; Fonial trunk (PJSIP)
+; ==============================
+; This template is rendered by envsubst in the Docker entrypoint.
+; Fill .env with FONIAL_* values.
+
+[fonial-aor]
+type=aor
+contact=sip:${FONIAL_REGISTRAR}
+
+[fonial-auth]
+type=auth
+auth_type=userpass
+username=${FONIAL_USER}
+password=${FONIAL_PASS}
+
+[fonial-endpoint]
+type=endpoint
+transport=transport-udp
+context=from-fonial
+disallow=all
+allow=alaw,ulaw
+outbound_auth=fonial-auth
+aors=fonial-aor
+from_domain=${FONIAL_DOMAIN}
+
+; NAT helpers (optional)
+force_rport=yes
+rewrite_contact=yes
+rtp_symmetric=yes
+
+; ==============================
+; Registration
+; ==============================
+[fonial-reg]
+type=registration
+outbound_auth=fonial-auth
+server_uri=sip:${FONIAL_REGISTRAR}
+client_uri=sip:${FONIAL_USER}@${FONIAL_DOMAIN}
+retry_interval=60
+forbidden_retry_interval=600
+expiration=3600
+
+; ==============================
+; Optional: external address hints (for NAT)
+; ==============================
+; Some setups prefer pjsip.conf 'external_signaling_address' or transport settings.
+; For simplicity, we keep it minimal here.
