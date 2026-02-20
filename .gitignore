@@ -1,0 +1,7 @@
+.env
+node/node_modules
+node/dist
+.DS_Store
+
+# optional runtime captures
+**/ws-capture-*.wav
