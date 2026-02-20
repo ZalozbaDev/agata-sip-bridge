@@ -1,0 +1,91 @@
+services:
+  asterisk:
+    build:
+      context: ./asterisk
+      dockerfile: Dockerfile
+    env_file:
+      - ./.env
+    environment:
+      # Asterisk ARI user/pass are rendered into ari.conf by entrypoint
+      ARI_USER: ${ARI_USER:-ariuser}
+      ARI_PASS: ${ARI_PASS:-aripass}
+      # Used to render PJSIP trunk config
+      FONIAL_USER: ${FONIAL_USER:-}
+      FONIAL_PASS: ${FONIAL_PASS:-}
+      FONIAL_DOMAIN: ${FONIAL_DOMAIN:-}
+      FONIAL_REGISTRAR: ${FONIAL_REGISTRAR:-}
+      INBOUND_DID: ${INBOUND_DID:-}
+      FONIAL_MATCH: ${FONIAL_MATCH:-}
+      # NAT helpers (optional)
+      EXTERNAL_ADDRESS: ${EXTERNAL_ADDRESS:-}
+      LOCAL_NET: ${LOCAL_NET:-172.16.0.0/12}
+      RTP_START: ${RTP_START:-10000}
+      RTP_END: ${RTP_END:-10100}
+      SIP_BIND: ${SIP_BIND:-0.0.0.0}
+      HTTP_BIND: ${HTTP_BIND:-0.0.0.0}
+    ports:
+      - '5060:5060/udp'
+      - '5060:5060/tcp'
+      - '8088:8088/tcp' # ARI HTTP + WebSocket
+      - '10000-10100:10000-10100/udp' # RTP
+    extra_hosts:
+      - 'sip-client-node:172.30.0.3'
+    networks:
+      sipnet:
+        ipv4_address: 172.30.0.2
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'curl -fsS -u "${ARI_USER:-ariuser}:${ARI_PASS:-aripass}" http://127.0.0.1:8088/ari/api-docs/resources.json >/dev/null',
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+
+  sip-client-node:
+    build:
+      context: ./node
+      dockerfile: Dockerfile
+    env_file:
+      - ./.env
+    environment:
+      ARI_URL: ${ARI_URL:-http://asterisk:8088/ari}
+      ARI_USER: ${ARI_USER:-ariuser}
+      ARI_PASS: ${ARI_PASS:-aripass}
+      ARI_APP: ${ARI_APP:-sipws}
+
+      WS_PORT: ${WS_PORT:-3000}
+      RTP_PORT: ${RTP_PORT:-5004}
+      RTP_CODEC: ${RTP_CODEC:-ulaw}
+      # Must be reachable from within the Asterisk container; prefer the Compose service name.
+      EXTERNAL_MEDIA_HOST: ${EXTERNAL_MEDIA_HOST:-sip-client-node:5004}
+
+      # Demo behavior
+      SEND_TEST_BEEP: ${SEND_TEST_BEEP:-1}
+      ECHO_INBOUND: ${ECHO_INBOUND:-0}
+
+      # Optional diagnostics
+      DUMP_WAV: ${DUMP_WAV:-0}
+      LOG_RTP_EVERY_N: ${LOG_RTP_EVERY_N:-200}
+    ports:
+      - '3004:${WS_PORT:-3000}/tcp' # WebSocket server (host:3004 -> container:$WS_PORT)
+      - '5004:5004/udp' # RTP from/to Asterisk externalMedia
+    extra_hosts:
+      - 'asterisk:172.30.0.2'
+    networks:
+      sipnet:
+        ipv4_address: 172.30.0.3
+    restart: unless-stopped
+    depends_on:
+      asterisk:
+        condition: service_healthy
+
+networks:
+  sipnet:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.0.0/16
