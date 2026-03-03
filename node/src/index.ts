@@ -258,6 +258,72 @@ function startBeepOnceRtpIsReady(cs: CallState): void {
   }, 20)
 }
 
+function startBusyToneOnceRtpIsReady(cs: CallState): void {
+  if (cs.beepTimer) return
+
+  // Wait until we know the remote RTP endpoint.
+  if (!cs.rtpRemote) {
+    setTimeout(() => startBusyToneOnceRtpIsReady(cs), 200)
+    return
+  }
+
+  const remote = cs.rtpRemote
+
+  // Busy tone: 480Hz, 500ms on/off pattern, 3.5 seconds total
+  const onDurationMs = 500
+  const offDurationMs = 500
+  const totalDurationMs = 3500
+  const cycleDurationMs = onDurationMs + offDurationMs
+
+  // Generate 480Hz busy tone PCM
+  const busyTonePcm = generateSinePcm16le({
+    frequencyHz: 480,
+    durationMs: onDurationMs,
+    sampleRateHz: 8000,
+    amplitude: 0.2,
+  })
+  const busyToneUlaw = encodeMuLaw(busyTonePcm)
+
+  // Generate silence (same duration)
+  const silencePcm = Buffer.alloc(busyTonePcm.length)
+  const silenceUlaw = encodeMuLaw(silencePcm)
+
+  const frameBytes = 160 // 20ms @ 8k
+  let cycleCount = 0
+  const maxCycles = Math.ceil(totalDurationMs / cycleDurationMs)
+
+  // eslint-disable-next-line no-console
+  console.log(
+    `[BUSY] start 480Hz busy tone inbound=${cs.inboundChannelId} duration=${totalDurationMs}ms`,
+  )
+
+  let tonePhase = 0 // 0 = tone, 1 = silence
+
+  cs.beepTimer = setInterval(() => {
+    cycleCount++
+
+    if (cycleCount > maxCycles) {
+      if (cs.beepTimer) clearInterval(cs.beepTimer)
+      cs.beepTimer = undefined
+      // eslint-disable-next-line no-console
+      console.log(`[BUSY] done inbound=${cs.inboundChannelId}`)
+      return
+    }
+
+    const payload = tonePhase === 0 ? busyToneUlaw : silenceUlaw
+
+    let phaseOffset = 0
+    while (phaseOffset < payload.length) {
+      const frame = payload.subarray(phaseOffset, phaseOffset + frameBytes)
+      phaseOffset += frameBytes
+      rtp.sendPayloadTo(remote, frame, frame.length)
+    }
+
+    // Switch phase for next iteration
+    tonePhase = tonePhase === 0 ? 1 : 0
+  }, cycleDurationMs)
+}
+
 async function primeRtpRemoteFromAri(cs: CallState): Promise<void> {
   if (!cfg.primeRtpFromAri) return
 
@@ -561,20 +627,86 @@ async function handleEvent(ev: AriEvent): Promise<void> {
 
     // Check if there's already an active call
     if (calls.size > 0) {
+      // eslint-disable-next-line no-console
+      console.log(
+        `[CALL] busy: rejecting inbound call chan=${channelId} (already ${calls.size} active call(s))`,
+      )
       try {
+        // Answer the call so we can send audio
         await ari.answer(channelId)
 
-        await ari.indicate(channelId, 'busy')
+        // Create external media so we can send RTP audio (busy tone)
+        const busyBridgeId = `busy-bridge-${channelId}`
+        const busyExternalChannelId = `busy-ext-${channelId}`
+        const externalHost = cfg.externalMediaHost || `127.0.0.1:${cfg.rtpPort}`
 
-        setTimeout(() => {
-          ari.hangup(channelId).catch(e => {
-            // eslint-disable-next-line no-console
-            console.warn(`[ARI] hangup failed chan=${channelId}`, e)
+        await ari.createBridge(busyBridgeId)
+        await ari.addChannelToBridge(busyBridgeId, channelId)
+
+        try {
+          await ari.createExternalMedia({
+            channelId: busyExternalChannelId,
+            externalHost,
+            format: 'ulaw',
+            direction: 'both',
           })
-        }, 5000) // 5 seconds of busy tone
+          // eslint-disable-next-line no-console
+          console.log(
+            `[BUSY] external media created chan=${channelId} ext=${busyExternalChannelId}`,
+          )
+        } catch (extErr) {
+          // eslint-disable-next-line no-console
+          console.warn(
+            `[BUSY] external media creation failed chan=${channelId}`,
+            extErr,
+          )
+        }
+
+        // Create a temporary call state to send busy tone
+        const busyCs: CallState = {
+          callId: `busy-${channelId}`,
+          inboundChannelId: channelId,
+          bridgeId: busyBridgeId,
+          externalChannelId: busyExternalChannelId,
+          startedAt: Date.now(),
+          injectedBuffer: Buffer.alloc(0),
+          formatAnnounced: false,
+          rtpRemote: undefined,
+          rtpRemoteKey: undefined,
+          vadSpeechActive: false,
+          vadLastSpeechAt: 0,
+          vadPacketCount: 0,
+          vadMaxDbfs: Number.NEGATIVE_INFINITY,
+          vadEverSpeech: false,
+          rtpFirstPacketAt: 0,
+          rtpLastPacketAt: 0,
+          rtpLastLevelDbfs: Number.NEGATIVE_INFINITY,
+          audioNextLevelLogAt: 0,
+        }
+
+        // Try to get RTP remote from ARI
+        await primeRtpRemoteFromAri(busyCs)
+
+        // Start playing busy tone once RTP is ready
+        startBusyToneOnceRtpIsReady(busyCs)
+
+        // Hangup after busy tone finishes (plus a small buffer)
+        setTimeout(async () => {
+          if (busyCs.beepTimer) clearInterval(busyCs.beepTimer)
+          try {
+            await ari.destroyBridge(busyBridgeId)
+          } catch {
+            // ignore
+          }
+          try {
+            await ari.hangup(channelId)
+          } catch {
+            // ignore
+          }
+        }, 5000)
       } catch (e) {
         // eslint-disable-next-line no-console
-        console.warn(`[ARI] busy indication failed chan=${channelId}`, e)
+        console.warn(`[BUSY] failed chan=${channelId}`, e)
         // If anything fails, try to hang up anyway
         try {
           await ari.hangup(channelId)
