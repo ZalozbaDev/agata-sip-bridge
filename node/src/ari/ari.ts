@@ -190,4 +190,17 @@ export class AriClient {
       return undefined
     }
   }
+
+  async indicate(
+    channelId: string,
+    indication: 'busy' | 'congestion' | 'ringing',
+  ): Promise<void> {
+    await this.http.post(
+      `/channels/${encodeURIComponent(channelId)}/indicate`,
+      null,
+      {
+        params: { indication },
+      },
+    )
+  }
 }

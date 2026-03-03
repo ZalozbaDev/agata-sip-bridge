@@ -559,12 +559,28 @@ async function handleEvent(ev: AriEvent): Promise<void> {
       return
     }
 
+    // Check if there's already an active call
     if (calls.size > 0) {
       try {
-        await ari.hangup(channelId, 'busy')
+        await ari.answer(channelId)
+
+        await ari.indicate(channelId, 'busy')
+
+        setTimeout(() => {
+          ari.hangup(channelId).catch(e => {
+            // eslint-disable-next-line no-console
+            console.warn(`[ARI] hangup failed chan=${channelId}`, e)
+          })
+        }, 5000) // 5 seconds of busy tone
       } catch (e) {
         // eslint-disable-next-line no-console
-        console.warn(`[ARI] hangup failed chan=${channelId}`, e)
+        console.warn(`[ARI] busy indication failed chan=${channelId}`, e)
+        // If anything fails, try to hang up anyway
+        try {
+          await ari.hangup(channelId)
+        } catch {
+          // ignore
+        }
       }
       return
     }
