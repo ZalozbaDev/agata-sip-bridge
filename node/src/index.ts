@@ -559,6 +559,16 @@ async function handleEvent(ev: AriEvent): Promise<void> {
       return
     }
 
+    if (calls.size > 0) {
+      try {
+        await ari.hangup(channelId, 'busy')
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.warn(`[ARI] hangup failed chan=${channelId}`, e)
+      }
+      return
+    }
+
     const cs = getOrCreateCallByInbound(channelId)
 
     wsHub.broadcastJson({

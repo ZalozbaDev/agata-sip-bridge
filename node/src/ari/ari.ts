@@ -113,8 +113,14 @@ export class AriClient {
     await this.http.post(`/channels/${encodeURIComponent(channelId)}/answer`)
   }
 
-  async hangup(channelId: string): Promise<void> {
-    await this.http.delete(`/channels/${encodeURIComponent(channelId)}`)
+  async hangup(channelId: string, cause?: string): Promise<void> {
+    if (cause) {
+      await this.http.delete(`/channels/${encodeURIComponent(channelId)}`, {
+        params: { reason: cause },
+      })
+    } else {
+      await this.http.delete(`/channels/${encodeURIComponent(channelId)}`)
+    }
   }
 
   async createBridge(bridgeId: string): Promise<void> {
