@@ -62,7 +62,7 @@ jobs:
         with:
           # allow creation for multiple platforms
           platforms: |
-            linux/amd64
+            linux/amd64,linux/arm64
           context: asterisk/
           file: asterisk/Dockerfile
           load: false

@@ -62,7 +62,7 @@ jobs:
         with:
           # allow creation for multiple platforms
           platforms: |
-            linux/amd64
+            linux/amd64,linux/arm64
           context: node/
           file: node/Dockerfile
           load: false
